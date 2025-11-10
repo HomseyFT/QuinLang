@@ -1,0 +1,87 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import List, Optional, Union
+
+# Expressions
+@dataclass
+class Expr:
+    pass
+
+@dataclass
+class Literal(Expr):
+    value: Union[int, str, bool, None]
+
+@dataclass
+class Identifier(Expr):
+    name: str
+
+@dataclass
+class Unary(Expr):
+    op: str
+    right: Expr
+
+@dataclass
+class Binary(Expr):
+    left: Expr
+    op: str
+    right: Expr
+
+@dataclass
+class Call(Expr):
+    callee: str
+    args: List[Expr]
+
+# Statements
+@dataclass
+class Stmt:
+    pass
+
+@dataclass
+class VarDecl(Stmt):
+    name: str
+    type_name: Optional[str]
+    init: Optional[Expr]
+
+@dataclass
+class Assign(Stmt):
+    name: str
+    value: Expr
+
+@dataclass
+class Print(Stmt):
+    value: Expr
+
+@dataclass
+class Return(Stmt):
+    value: Optional[Expr]
+
+@dataclass
+class If(Stmt):
+    cond: Expr
+    then_block: List[Stmt]
+    else_block: Optional[List[Stmt]] = None
+
+@dataclass
+class While(Stmt):
+    cond: Expr
+    body: List[Stmt]
+
+@dataclass
+class Block(Stmt):
+    stmts: List[Stmt] = field(default_factory=list)
+
+@dataclass
+class Param:
+    name: str
+    type_name: str
+
+@dataclass
+class Function:
+    name: str
+    params: List[Param]
+    return_type: Optional[str]
+    body: List[Stmt]
+
+@dataclass
+class Program:
+    functions: List[Function]
