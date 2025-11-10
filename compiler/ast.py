@@ -37,6 +37,10 @@ class Stmt:
     pass
 
 @dataclass
+class ExprStmt(Stmt):
+    expr: Expr
+
+@dataclass
 class VarDecl(Stmt):
     name: str
     type_name: Optional[str]
