@@ -1,0 +1,224 @@
+from typing import List, Optional
+from .tokens import Token, TokenType
+from . import ast as A
+
+class ParseError(Exception):
+    pass
+
+class Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.current = 0
+
+    def parse(self) -> A.Program:
+        funcs: List[A.Function] = []
+        while not self._is_at_end():
+            funcs.append(self._function())
+        return A.Program(funcs)
+
+    # Helpers
+    def _match(self, *types: TokenType) -> bool:
+        for t in types:
+            if self._check(t):
+                self._advance()
+                return True
+        return False
+
+    def _consume(self, type_: TokenType, msg: str) -> Token:
+        if self._check(type_):
+            return self._advance()
+        raise ParseError(msg)
+
+    def _check(self, type_: TokenType) -> bool:
+        if self._is_at_end():
+            return False
+        return self._peek().type == type_
+
+    def _advance(self) -> Token:
+        if not self._is_at_end():
+            self.current += 1
+        return self._previous()
+
+    def _is_at_end(self) -> bool:
+        return self._peek().type == TokenType.EOF
+
+    def _peek(self) -> Token:
+        return self.tokens[self.current]
+
+    def _previous(self) -> Token:
+        return self.tokens[self.current - 1]
+
+    # Grammar
+    def _function(self) -> A.Function:
+        self._consume(TokenType.FN, "Expected 'fn' at function start")
+        name_tok = self._consume(TokenType.IDENTIFIER, "Expected function name")
+        self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name")
+        params: List[A.Param] = []
+        if not self._check(TokenType.RIGHT_PAREN):
+            while True:
+                p_name = self._consume(TokenType.IDENTIFIER, "Expected parameter name").lexeme
+                self._consume(TokenType.COLON, "Expected ':' after parameter name")
+                p_type = self._type_name()
+                params.append(A.Param(p_name, p_type))
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after parameters")
+        ret_type: Optional[str] = None
+        if self._match(TokenType.COLON):
+            ret_type = self._type_name()
+        body = self._block()
+        return A.Function(name_tok.lexeme, params, ret_type, body)
+
+    def _type_name(self) -> str:
+        if self._match(TokenType.INT):
+            return "int"
+        if self._match(TokenType.STR):
+            return "str"
+        if self._match(TokenType.VOID):
+            return "void"
+        # allow identifiers for user-defined types in future
+        tok = self._consume(TokenType.IDENTIFIER, "Expected type name")
+        return tok.lexeme
+
+    def _block(self) -> List[A.Stmt]:
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' to start block")
+        stmts: List[A.Stmt] = []
+        while not self._check(TokenType.RIGHT_BRACE):
+            stmts.append(self._declaration())
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after block")
+        return stmts
+
+    def _declaration(self) -> A.Stmt:
+        if self._match(TokenType.LET):
+            return self._var_decl()
+        return self._statement()
+
+    def _var_decl(self) -> A.VarDecl:
+        name = self._consume(TokenType.IDENTIFIER, "Expected variable name").lexeme
+        type_name: Optional[str] = None
+        init: Optional[A.Expr] = None
+        if self._match(TokenType.COLON):
+            type_name = self._type_name()
+        if self._match(TokenType.EQUAL):
+            init = self._expression()
+        self._consume(TokenType.SEMICOLON, "Expected ';' after variable declaration")
+        return A.VarDecl(name, type_name, init)
+
+    def _statement(self) -> A.Stmt:
+        if self._match(TokenType.PRINT):
+            self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'print'")
+            expr = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after print expression")
+            self._consume(TokenType.SEMICOLON, "Expected ';' after print statement")
+            return A.Print(expr)
+        if self._match(TokenType.RETURN):
+            value: Optional[A.Expr] = None
+            if not self._check(TokenType.SEMICOLON):
+                value = self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after return value")
+            return A.Return(value)
+        if self._match(TokenType.IF):
+            self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'if'")
+            cond = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after condition")
+            then_block = self._block()
+            else_block = None
+            if self._match(TokenType.ELSE):
+                else_block = self._block()
+            return A.If(cond, then_block, else_block)
+        if self._match(TokenType.WHILE):
+            self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'while'")
+            cond = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after condition")
+            body = self._block()
+            return A.While(cond, body)
+        # assignment lookahead
+        if self._check(TokenType.IDENTIFIER):
+            # safe lookahead for '='
+            if self.tokens[self.current + 1].type == TokenType.EQUAL:
+                name = self._advance().lexeme  # consume identifier
+                self._advance()  # consume '='
+                value = self._expression()
+                self._consume(TokenType.SEMICOLON, "Expected ';' after assignment")
+                return A.Assign(name, value)
+        # expression statement
+        expr = self._expression()
+        self._consume(TokenType.SEMICOLON, "Expected ';' after expression")
+        return A.ExprStmt(expr)
+
+    def _expression(self) -> A.Expr:
+        return self._assignment()
+
+    def _assignment(self) -> A.Expr:
+        # assignment handled at statement level for simplicity
+        return self._equality()
+
+    def _equality(self) -> A.Expr:
+        expr = self._comparison()
+        while self._match(TokenType.EQUAL_EQUAL, TokenType.BANG_EQUAL):
+            op = self._previous().lexeme
+            right = self._comparison()
+            expr = A.Binary(expr, op, right)
+        return expr
+
+    def _comparison(self) -> A.Expr:
+        expr = self._term()
+        while self._match(TokenType.GREATER, TokenType.GREATER_EQUAL, TokenType.LESS, TokenType.LESS_EQUAL):
+            op = self._previous().lexeme
+            right = self._term()
+            expr = A.Binary(expr, op, right)
+        return expr
+
+    def _term(self) -> A.Expr:
+        expr = self._factor()
+        while self._match(TokenType.PLUS, TokenType.MINUS):
+            op = self._previous().lexeme
+            right = self._factor()
+            expr = A.Binary(expr, op, right)
+        return expr
+
+    def _factor(self) -> A.Expr:
+        expr = self._unary()
+        while self._match(TokenType.STAR, TokenType.SLASH):
+            op = self._previous().lexeme
+            right = self._unary()
+            expr = A.Binary(expr, op, right)
+        return expr
+
+    def _unary(self) -> A.Expr:
+        if self._match(TokenType.BANG, TokenType.MINUS):
+            op = self._previous().lexeme
+            right = self._unary()
+            return A.Unary(op, right)
+        return self._call()
+
+    def _call(self) -> A.Expr:
+        expr = self._primary()
+        # Only support simple direct calls: IDENT '(' args? ')'
+        if isinstance(expr, A.Identifier) and self._match(TokenType.LEFT_PAREN):
+            args: List[A.Expr] = []
+            if not self._check(TokenType.RIGHT_PAREN):
+                while True:
+                    args.append(self._expression())
+                    if not self._match(TokenType.COMMA):
+                        break
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments")
+            return A.Call(expr.name, args)
+        return expr
+
+    def _primary(self) -> A.Expr:
+        if self._match(TokenType.FALSE):
+            return A.Literal(False)
+        if self._match(TokenType.TRUE):
+            return A.Literal(True)
+        if self._match(TokenType.NUMBER):
+            return A.Literal(self._previous().literal)
+        if self._match(TokenType.STRING):
+            return A.Literal(self._previous().literal)
+        if self._match(TokenType.IDENTIFIER):
+            return A.Identifier(self._previous().lexeme)
+        if self._match(TokenType.LEFT_PAREN):
+            expr = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after expression")
+            return expr
+        raise ParseError("Expected expression")
