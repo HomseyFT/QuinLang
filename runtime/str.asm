@@ -1,6 +1,16 @@
 ; String routines for '$'-terminated strings in DS
-; rt_print_str: DS:DX -> '$' string, prints via int 21h/AH=09h
-; rt_str_cmp:  DS:SI and DS:DI -> compare, returns AX: -1 if s1<s2, 0 if equal, 1 if s1>s2
+;
+; rt_print_str
+;   Inputs:  DS:DX -> '$'-terminated string
+;   Preserves: AX (saved/restored); BX,CX,SI,DI,DS,ES,BP,SP not modified
+;   Clobbers: FLAGS; DOS call may alter AH internally but we restore AX
+;
+; rt_str_cmp
+;   Inputs:  DS:SI -> s1, DS:DI -> s2 ('$'-terminated)
+;   Returns: AX = -1 if s1 < s2, 0 if equal, 1 if s1 > s2 (unsigned byte compare)
+;   Preserves: BX (saved/restored)
+;   Clobbers: AX, SI, DI, FLAGS
+;
 
 global rt_print_str
 rt_print_str:
@@ -12,7 +22,6 @@ rt_print_str:
 
 ; Compare strings byte by byte until '$' or difference
 ; Uses AL, BL as current chars
-; Returns AX = -1/0/1
 
 global rt_str_cmp
 rt_str_cmp:
